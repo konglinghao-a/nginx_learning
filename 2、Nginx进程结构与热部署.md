@@ -274,7 +274,7 @@ http {
 
 - 基于多 IP 的虚拟主机
 - 基于多端口的虚拟主机
-- 基于域名的虚拟主机（用的比较多）
+- 基于多域名的虚拟主机（用的比较多）
 
 ## 2-10 基于多 IP 的虚拟主机
 
@@ -318,13 +318,55 @@ http {
 }
 ```
 
-
-
 ## 2-11 基于多端口的虚拟主机
 
+`/opt/nginx/conf/nginx.conf`
 
+```shell
+http {
+	server {
+		listen 8080; 
+		server_name localhost;
+		location / {
+			root html/virtual_host1;
+			index index.html index.htm;
+		}
+	}
+	server {
+		charset utf-8; # 指定字符集
+		listen 8081; # 如果不是 192.168.1.101:8080，那么所有的8080端口都会监听到
+		server_name localhost;
+		location / {
+			root html/virtual_host2;
+			index index.html index.htm;
+		}
+	}
+}
+```
 
-## 2-12 基于域名的虚拟主机
+## 2-12 基于多域名的虚拟主机
 
+`/opt/nginx/conf/nginx.conf`
 
+```shell
+http {
+	server {
+		listen 80;
+		# 这时候 server_name 就要写我们配置的域名
+		server_name www.nginx.com; # 我们配置的第一个域名
+		location / {
+			root html/domain_vm1;
+			index index.html index.htm;
+		}
+	}
+	server {
+		listen 80;
+		server_name www.nginx.cn; # 我们配置的第二个域名
+		location / {
+			root html/domain_vm2;
+			index index.html index.htm;
+		}
+	}
+}
+```
 

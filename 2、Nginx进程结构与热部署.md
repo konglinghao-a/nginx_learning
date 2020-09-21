@@ -109,8 +109,97 @@
 ### 热升级的流程
 
 1. 将旧的 nginx 文件替换成新的 nginx 文件（这里指的 nginx 文件是主程序文件，是 sbin 目录下的；要注意的是，如果你的目录结构发生改变的话，这么做是不太行的，还要配上别的操作）。
-2. 向 master 进程发送 USR2 信号
-3. 旧的 master 进程修改 pid 文件，并在其后面加上后缀 .oldbin。这一步的原因是，替换了 nginx 文件后，配置也发生了改变，旧的进程要给新的进程让路，新的 master 进程也需要 pid.bin 文件。
-4. master 进程用新 nginx 文件，启动新 master 进程（这个时候新旧 master 是并存的，我们可以看看新的 master 进程是不是满足我们的预期，如果满足就可以把旧的 master 退出了）。
-5. 向旧的 master 进程发出 WINCH 信号，旧的 worker 子进程退出。WINCH 信号和直接发送 QUIT 信号有什么区别呢？
+2. 向旧的 master 进程发送 USR2 信号
+3. 旧的 master 进程修改 pid 文件，并在其后面加上后缀 .oldbin（nginx.pid.oldbin 里面存的就是旧的 master 的进程号）。这一步的原因是，替换了 nginx 文件后，配置也发生了改变，旧的进程要给新的进程让路，新的 master 进程也需要 nginx.pid 文件。
+4. 旧的 master 进程用新 nginx 文件，启动新 master 进程（这个时候新旧 master 是并存的，我们可以看看新的 master 进程是不是满足我们的预期，如果满足就可以把旧的 master 慢慢退出了）。
+5. 向旧的 master 进程发出 WINCH 信号，旧的 worker 子进程退出。WINCH 信号和直接发送 QUIT 信号有什么区别呢？旧的 master 进程有一些旧的 worker 子进程，如果发送 QUIT 信号，旧的 master 和 worker 进程就会一起退出了；如果发送 WINCH 信号，它会使 worker 子进程先退出以避免接收新的请求（旧的请求没处理完的它还是会自己先处理完的），使得新的请求都被路由到新的 worker 子进程。之所以不退出旧的 master 进程，就是为了给回滚情形做准备。
+6. 回滚情形：向旧 master 发送 HUP（这个时候会把旧的 worker 子进程拉起来），向新的 master 发送 QUIT。
+
+### Nginx 热部署步骤演示
+
+```shell
+# 可以看看自己的 nginx 是不是开着
+ps -ef | grep nginx
+
+# 如果直接替换 sbin 下的文件，得确保 /opt/nginx 的目录结构一致 
+
+# 首先我们得备份一下我们的 nginx
+cd /opt/nginx/sbin
+cp nginx nginx.bak
+# 然后如果你有编译好的 nginx 二进制文件，就可以直接复制到这里把旧的 nginx 文件覆盖了（假设这里已经覆盖替换完了）。
+
+# 给旧的 master 进程发送 USR2 信号，主要目的就是启动新的 master
+kill -s SIGUSR2 27387 # 旧 master 进程的 PID 是27387
+# 这个时候 ps -ef | grep nginx ，可以发现新旧 master 是并存的
+
+# 给旧的 master 进程发送 WINCH 信号，让其退出旧的 worker 子进程
+kill -s SIGWINCH 27387
+# 这个时候 ps -ef | grep nginx ，可以发现旧 master 仍存在，但是 worker 子进程退出了
+
+# 情况1：发现新功能都没啥问题，那么旧的 master 进程就可以退出了
+kill -s SIGQUIT 27387
+
+# 情况2：需要回滚
+kill -s SIGHUP 27387
+kill -s SIGQUIT 27473 # 退出新的 master 进程
+```
+
+## 2-6 Nginx 的模块化管理机制
+
+模块化设计保证了 nginx 的高性能，高可靠性。因为模块之间的耦合度很低，一个模块出问题对其他模块的影响不大。
+
+### nginx 模块结构图
+
+- 核心模块：主要是为 nginx 的正常运行提供保障
+- 标准 HTTP 模块：提供了对标准 HTTP 的解析的功能
+- 可选 HTTP 模块：扩展处理标准 HTTP 的功能
+- mail 服务模块：支持 nginx 的邮件服务协议
+- 第三方模块：扩展 nginx 服务的应用
+
+![](./media/5.png)
+
+###  模块体系结构
+
+<img src="./media/6.png" style="zoom:50%;" />
+
+## 2-7 Nginx 编译安装的配置参数
+
+nginx 是基于模块化的，我们可以再编译的时候选择性的将模块编译到我们的 nginx 中，也可以选择去除某些模块。
+
+### 常用配置参数
+
+| 参数             | 含义                                |
+| ---------------- | ----------------------------------- |
+| --prefix         | 指定安装的目录                      |
+| --user           | 运行 nginx 的 worker 子进程的属主   |
+| --group          | 运行 nginx 的 worker 子进程的属组   |
+| --pid-path       | 存放进程运行 pid 文件的路径         |
+| --conf-path      | 配置文件 nginx.conf 的存放路径      |
+| --error-log-path | 错误日志 error.log 的存放路径       |
+| --http-log-path  | 访问日志 access.log 的存放路径      |
+| --with-pcre      | pcre 库的存放路径，正则表达式会用到 |
+| --with-zlib      | zlib 库的存放路径，gzip 模块会用到  |
+
+### 内置参数默认原则
+
+- 显示加上，默认不内置：--with
+- 显示去掉，默认内置：--without
+
+### 编译安装 nginx
+
+- nginx 源码包：[地址](http://nginx.org/en/download.html)
+- pcre 源码包：[地址](http://pcre.org/)
+- zlib 源码包：[地址](http://www.zlib.net/)
+
+```shell
+# 首先下载一波源码包
+cd /opt/source
+wget http://nginx.org/download/nginx-1.16.1.tar.gz # nginx
+wget https://ftp.pcre.org/pub/pcre/pcre-8.43.tar.gz # pcre
+wget http://www.zlib.net/zlib-1.2.11.tar.gz # zlib
+# 解压
+tar xf nginx-1.16.1.tar.gz 
+tar xf pcre-8.43.tar.gz 
+tar xf zlib-1.2.11.tar.gz 
+```
 

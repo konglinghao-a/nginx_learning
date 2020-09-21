@@ -4,7 +4,7 @@
 
 - nginx 采用的是多进程的一种进程结构，这是为了**高可用性和高可靠性**。
 
-<img src="./media/3.png"/>
+<img src="./media/3.png" style="zoom:67%;" />
 
 ### Master Process
 
@@ -182,8 +182,8 @@ nginx 是基于模块化的，我们可以再编译的时候选择性的将模�
 
 ### 内置参数默认原则
 
-- 显示加上，默认不内置：--with
-- 显示去掉，默认内置：--without
+- --with：默认不内置。--with-http_ssl_module，意思就是说这个模块默认不内置，如果我们希望又这个模块，那么我们就得在编译的时候（./configure）加上这个参数
+- --without：默认内置。--without-http_ssi_module，意思就是说这个模块已经默认编译进 eginx
 
 ### 编译安装 nginx
 
@@ -199,7 +199,80 @@ wget https://ftp.pcre.org/pub/pcre/pcre-8.43.tar.gz # pcre
 wget http://www.zlib.net/zlib-1.2.11.tar.gz # zlib
 # 解压
 tar xf nginx-1.16.1.tar.gz 
-tar xf pcre-8.43.tar.gz 
+tar xf pcre-8.43.tar.gz
 tar xf zlib-1.2.11.tar.gz 
+
+# 检查编译环境。--prefix 指定安装目录，--conf-path 指定配置文件的目录
+# 可以通过 ./configure --help 可以显示编译安装的信息
+# pcre 和 zlib 的路径一定要记得写
+cd nginx-1.16.1/
+./configure --prefix=/opt/nginx --conf-path=/opt/nginx/conf/nginx.conf --user=nginx --group=nginx --pid-path=/opt/nginx/pid/nginx.pid  --error-log-path=/opt/nginx/logs/error.log --http-log-path=/opt/nginx/logs/access.log  --with-pcre=/opt/source/pcre-8.43 --with-zlib=/opt/source/zlib-1.2.11 --with-http_ssl_module --with-http_image_filter_module --with-http_stub_status_module
+# 如果这个时候遇到缺少 c 的错误，那就 yum install gcc gcc-c++
+# 如果这个时候遇到 SSL 模块需要 OpenSSL 库的错误，那就 yum install openssl openssl-devel
+# 如果这个时候遇到 HTTP iamge filter 模块需要 GD 库的错误，那就 yum install gd gd-devel
+
+# 如果没有错，并生成 Configuration summary，那就是说，可以进行编译了！
+make # 用 make 命令进行编译；这时候会有 Makefile，进去看看就知道 make 的用法了
+make install # 进行安装
+
+# 看看生成的目录：
+ls -al /opt/nginx
+# drwxr-xr-x. 2 root root 4096 Sep 21 15:07 conf
+# drwxr-xr-x. 2 root root   40 Sep 21 15:07 html
+# drwxr-xr-x. 2 root root    6 Sep 21 15:07 logs
+# drwxr-xr-x. 2 root root    6 Sep 21 15:07 pid
+# drwxr-xr-x. 2 root root   19 Sep 21 15:07 sbin
+
+# 启动 nginx
+/opt/nginx/sbin/nginx -c /opt/nginx/conf/nginx.conf
+# 可以通过 -h 参数来看看 nginx 的一些操作和信息
+/opt/nginx/sbin/nginx -h
+# 通过帮助文件我们就能知道， /opt/nginx/sbin/nginx -v 就能显示出 nginx 的信息
+```
+
+```shell
+# 如果无法启动，那么可能是没有 nginx 这个用户
+# 如果用 rpm 包进行安装的话，系统会添加一个用户叫 nginx，编译安装不会添加用户，因此我们要添加
+# 可以通过 cat /etc/passwd 来看是不是有 nginx 这个用户
+useradd nginx
+```
+
+## 2-8 Nginx 配置文件结构
+
+### 配置文件结构
+
+- **main 模块**：通常定义我们的全局配置，比如说运行 nginx 的用户是谁，启动几个 worker 进程，等。
+- **events 模块**：事件模块设置，比如配置影响 nginx 服务器与用户的网络连接。
+- **http 模块**：HTTP 核心模块设置，方向代理，缓存，日志定义等配置都在这里配置。它能嵌套多个 server。
+- **server 模块**：可以配置虚拟主机的相关参数。如果现在有三个域名来部署不同的网站服务，其实对于不同的服务可以配置到一台 nginx 服务器上，只要在 server 中定义对应的域名即可。它能嵌套多个 location。
+- **location 模块**：只能用在 server 中，主要是配置请求的路由与各个页面的处理情况
+
+<img src="./media/7.png" style="zoom:67%;" />
+
+### 配置文件示例
+
+```shell
+user nginx;
+group nginx;
+...
+events {
+	...
+}
+http {
+	...
+	server {
+		location path {
+			...
+		}
+		...
+	}
+	...
+}
+```
+
+### 环境演示
+
+```shell
+
 ```
 

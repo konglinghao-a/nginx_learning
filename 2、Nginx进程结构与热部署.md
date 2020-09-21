@@ -270,9 +270,61 @@ http {
 }
 ```
 
-### 环境演示
+## 2-9 虚拟主机的分类
+
+- 基于多 IP 的虚拟主机
+- 基于多端口的虚拟主机
+- 基于域名的虚拟主机（用的比较多）
+
+## 2-10 基于多 IP 的虚拟主机
+
+基于多 IP 的虚拟主机，通常也就意味着有多块网卡。
+
+`/opt/nginx/conf/nginx.conf`
 
 ```shell
-
+# 配置三台虚拟主机
+# ...
+http {
+	server {
+		# 第一台虚拟主机监听的 IP（端口默认是 80）
+		listen 192.168.1.240;
+		server_name localhost;
+		# 我们安装 nginx 的时候安装到了 /opt/nginx 下，那么下面的相对路径，比如 html，完整路径就是：/opt/nginx/html
+		location / {
+			# 访问根路径的时候，会去 /opt/nginx/html/server1 目录下找 index.html 文件，找不到就找 index.htm 文件
+			root html/server1;
+			index index.html index.htm;
+		}
+	}
+    server {
+    	# 第二台虚拟主机监听的 IP
+		listen 192.168.1.242;
+		server_name localhost;
+		location / {
+			root html/server2;
+			index index.html index.htm;
+		}
+	}
+    server {
+   	 	# 第三台虚拟主机监听的 IP
+		listen 192.168.1.244;
+		server_name localhost;
+		location / {
+			root html/server3;
+			index index.html index.htm;
+		}
+	}
+}
 ```
+
+
+
+## 2-11 基于多端口的虚拟主机
+
+
+
+## 2-12 基于域名的虚拟主机
+
+
 

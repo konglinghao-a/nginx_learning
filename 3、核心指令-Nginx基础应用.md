@@ -158,25 +158,141 @@ events {
   - server_name www.nginx.com
   - server_name *.ningx.com
   - server_name www.nginx.*
-  - server_name ~^www\\.nginx\\.*$    以 ~ 开头说明是个正则表达式匹配
+  - server_name ~^www\\.nginx\\..*$    以 ~ 开头说明是个正则表达式匹配
+
+### 多域名如何匹配
+
+```shell
+# 假如先定义四个虚拟主机，然后思考它们的优先级（谁先匹配）
+server {
+	server_name www.nginx.org; # 精确匹配
+}
+server {
+	server_name www.nginx.*; # 右侧通配符匹配
+}
+server {
+	server_name *.nginx.org; # 左侧通配符匹配
+}
+server {
+	server_name ~^www\.nginx\..*$; # 正则表达式匹配
+}
+```
+
+- 匹配优先级 **从高到低** 为：精确匹配、左侧通配符匹配、右侧通配符匹配、正则表达式匹配
 
 ## 3-4 root 和 alias 的区别
 
+这两者都是用来指定 uri 和磁盘上具体静态资源的映射关系。
 
+### 语法结构
+
+- root：
+  - 语法：root path    **（通常 path 目录下存放着我们的 html 文件）**
+  - 上下文：http server location if（4 个段都能用）
+- alias：
+  - 语法：alias path
+  - 上下文：location
+
+### 共同点与区别
+
+- 相同点：URI 到磁盘文件的映射
+- 区别：root 会将定义路径与 URI 叠加；alias 只取定义路径
+
+```shell
+location /picture {
+	root /opt/nginx/html/picture;
+}
+# 客户端请求 www.test.com/picture/1.jpg ，则对应磁盘映射路径为 /opt/nginx/html/picture/picture/1.jpg
+
+location /picture {
+	alias /opt/nginx/html/picture/;
+}
+# 客户端请求 www.test.com/picture/1.jpg，则对应磁盘映射路径为 /opt/nginx/html/picture/1.jpg
+```
+
+**注意：**使用 alias 的时候，末尾一定加斜杠（/）。alias 只能位于 location 块中。
 
 ## 3-5 location 的基础用法
 
+### 语法结构
 
+- 语法：location [ = | ~ | ~* | ^~ ] uri { ... }**（中括号里面的为可选）**
+- 上下文：server location
 
-## 3-6 location 指令中匹配规则的优先级
+| 匹配规则     | 含义                   | 示例                               |
+| ------------ | ---------------------- | ---------------------------------- |
+| =            | 精确匹配               | location = /images/ { ... }        |
+| ~            | 正则匹配，区分大小写   | location ~ \\.(jpg\|gif)$ { ... }  |
+| ~*           | 正则匹配，不区分大小写 | location ~* \\.(jpg\|gif)$ { ... } |
+| ^~           | 匹配到即停止搜索       | location ^~ /images/ { ... }       |
+| 不带任何符号 |                        | location / { ... }                 |
 
+### location 指令中匹配规则的优先级
 
+优先级**从高到低**依次为：=、^~、~、~*、不带任何字符
 
-## 3-7 location 中 URL 结尾的反斜线
+## 3-6 location 中 URL 结尾的斜线
 
+### URL 写法区别
 
+```shell
+# 不带斜线（/）
+location /test {
+	...
+}
 
-## 3-8 stub_status 模块用法
+# 带斜线（/）
+location /test/ {
+	...
+}
+```
 
+- **不带 /**：如果是 /test（location 里面啥都不写），首先 nginx 还是会将其当作一个目录来进行处理，会去找 test 目录（注意，一定是文件夹）是否存在，如果存在那就会找 test 目录是否有 index.html。但是，如果找不到 test 目录的话，会有另外的处理机制，那就是会将 test 当成一个文件来查找，如果 test 文件存在，那就会把 test 文件中的内容直接返回。
+- **带 /**：如果是 /test/，它会直接将其当成一个目录来进行查找，如果存在，那就会去找 test 目录下是否有 index.html 文件。但是如果 test 目录不存在，它不会将 test 当成个文件再来查找。
 
+## 3-7 stub_status 模块用法
+
+提供 nginx 监控页面功能的模块。该模块可以实现我们在 web 应用中实时去查看 nginx 的状态。比如当前正在处理用户的请求连接数量等等，都可以监控。
+
+它默认不会编译进 nginx ，所以在编译安装的时候要加上：--with-http_stub_status_module
+
+### 语法结构
+
+- 指令：stub_status;
+- 低于 1.7.5 版本：stub_status on;
+- 上下文：server location 
+
+```shell
+# 配置示例
+location /uri { # 这个 uri 尽可能显得难猜点，别被用户猜到
+	stub_status;
+}
+```
+
+```shell
+# 显示出的效果
+Active connections: 2
+server accepts handled requests
+ 883 883 928
+Reading: 0 Writing: 1 Waiting: 1
+```
+
+| 状态项             | 含义                     |
+| ------------------ | ------------------------ |
+| Active connections | 活跃的连接数量           |
+| accepts            | 接受的客户端连接总数量   |
+| handled            | 处理的客户端连接总数量   |
+| requests           | 客户端总的请求数量       |
+| Reading            | 读取客户端的连接数       |
+| Writing            | 响应数据到客户端的连接数 |
+| Waiting            | 空闲客户端请求连接数量   |
+
+### 内嵌变量
+
+| 变量名               | 含义                     |
+| -------------------- | ------------------------ |
+| $connections_active  | 同 Active connections 值 |
+| $connections_reading | 同 Reading 值            |
+| $connections_writing | 同 Writing 值            |
+| $connections_waiting | 同 Waiting 值            |
 

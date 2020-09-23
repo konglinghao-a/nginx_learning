@@ -119,23 +119,164 @@ http {
   }
   ```
 
-  
 
 ## 4-4 限制特定 IP 或网段访问的 access 模块
 
+通过限制特定 IP 或网段访问，从而能够实现 nginx 的访问控制。
 
+### 指令集
+
+- allow
+  - allow address | CIDR | UNIX | all;
+  - 默认值：无
+  - 上下文：http、server、location、limit_except
+  - 示例：allow 192.168.0.10;    放行 192.168.0.10 这个特定 IP
+- deny
+  - deny address | CIDR | UNIX | all;
+  - 默认值：无
+  - 上下文：http、server、location、limit_except
+  - 示例：allow 192.168.0.0/24;   拒绝 192.168.0.0 这个网段
+
+```shell
+location / {
+	deny 192.168.1.1;
+	allow 192.168.1.0/24; # 先拒绝掉上面的（上面的这句在这个网段之内），然后再放行下面的。
+	allow 10.1.1.0/16;
+	allow 2001:0db8::/32;
+	deny all; # 除上面允许的网段之外，全部都拒绝掉。
+}
+```
 
 ## 4-5 限制特定用户访问的 auth_basic 模块
 
+针对特定的 Url，可以让它提供账号或者密码来进行访问。
 
+- 基于 HTTP Basic Authentication 协议进行用户名密码认证
+- 默认编译进 Nginx，通过 --without-http_auth_basic_module 禁用
+
+### 指令
+
+- auth_basic：决定是否打开 ”用户名密码验证“ 这个功能
+  - 语法：**auth_basic string | off;**
+  - 默认值：auth_basic off;
+  - 上下文：http、server、location、limit_except
+- auth_basic_user_file：指定密钥文件，也就是说来存放用户名和密码，这个文件可以通过**生成密码文件工具**来生成。
+  - 语法：**auth_basic_user_file file;**
+  - 默认值：-
+  - 上下文：http、server、location、limit_except
+
+### 生成密码文件工具
+
+- 可执行程序：htpasswd
+- 所属软件包：httpd-tools
+- 生成新的密码文件：htpasswd -bc encrypt_pass jack 123456   （-c 是 create 的意思）
+- 添加新用户密码：htpasswd -b encrypt_pass mike 123456
+- 可以去 [这里](https://centos.pkgs.org/7/centos-x86_64/httpd-tools-2.4.6-93.el7.centos.x86_64.rpm.html) 下载软件包噢 ^_^
+
+`/opt/source`
+
+```shell
+# 下载软件包
+wget http://mirror.centos.org/centos/7/os/x86_64/Packages/httpd-tools-2.4.6-93.el7.centos.x86_64.rpm
+# 解压
+rpm -ivh httpd-tools-2.4.6-93.el7.centos.x86_64.rpm
+# 创建 auth 文件夹
+cd /opt/nginx
+mkdir auth
+cd auth
+
+# 创建用户 jack，加密文件的名字新建为 encrypt_pass
+htpasswd -b -c encrypt_pass jack 123456
+# 创建用户 mike
+htpasswd -b encrypt_pass mike 123456
+
+# 然后去配置文件中引用这个文件
+vim /opt/nginx/conf/nginx.conf
+```
+
+`/opt/nginx/conf/nginx.conf`
+
+```shell
+http {
+	server {
+		location /bbs/ {
+			root html;
+			index index.html;
+			auth_basic "test user password: ";
+             auth_basic_user_file /opt/nginx/auth/encrypt_pass; # 最好用绝对路径
+		}
+	}
+}
+```
+
+- 检查：/opt/nginx/sbin/nginx -t
+- 重启：/opt/nginx/sbin/nginx -s reload
 
 ## 4-6 基于 HTTP 响应状态码做权限控制的 auth_request 模块
 
+实际生产环境中，可能会搭建一个鉴权的服务器，当你想要访问特定的模块的时候，你需要跟鉴权服务器发送请求，鉴权服务器通过以后才能正常地访问业务系统。
 
+- 基于子请求受到的 HTTP 响应码做访问控制
+- 默认未编译进 nginx，通过 --with-http_auth_request_module 启用
+
+### 原理
+
+- 用户 ——> 鉴权服务器 ——> Nginx
+- 用户正常发起一个 request，如果没有鉴权服务器，那么 request 会直接发给 nginx，然后由 nginx 直接返回；如果这个时候我们想做一点鉴权的工作，那么就可以用 auth_request 模块搭建一个鉴权服务器，那么 request 会首先发给鉴权服务器，由鉴权服务器做完处理之后，它会有一些状态码（比如 401，403）产生，如果是 401 或 403，那么说明鉴权失败，鉴权服务器直接把带有失败信息的响应返回给用户；如果是 2开头的状态码，那说明鉴权通过，这样鉴权服务器会再发送一个请求给 nginx，让 nginx 做处理，处理完直接把响应返回给用户。
+
+![](./media/9.png)
+
+### 指令
+
+- auth_request
+  - 语法：auth_request uri | off
+  - 默认值：auth_request off;
+  - 上下文：http、server、location
+- auth_request_set
+  - 语法：auth_request_Set $variable value;
+  - 默认值：-
+  - 上下文：http、server、location
+
+```shell
+# 对 /private/ 这个 uri 做访问控制
+location /private/ {
+	# 当访问 /private/ 这个 uri 的时候，把它指向另外鉴权模块的 uri
+	auth_request /auth;
+}
+location /auth {
+	# 反向代理到下面这个鉴权服务器上做鉴权，假如这个 uri 做完鉴权以后返回的状态码 2xx 开头，这就代表鉴权成功，成功了以后 /private 才能正确返回自己下面的 web 内容；如果鉴权失败，那就直接返回这个 uri 的状态码和 web 内容。
+	proxy_pass http://127.0.0.1:8080/verify;
+	proxy_pass_request_body off;
+	proxy_set_header Content-Length "";
+	proxy_set_header X-Original-URI $request_uri;
+}
+```
 
 ## 4-7 rewrite 模块中的 return 指令
 
+rewrite 模块主要实现了对 url 的重写。
 
+### return 功能
+
+- 停止处理请求，直接返回响应码或重定向到其他 URL
+- 执行 return 指令后，location 中后续指令将不会被执行
+
+```shell
+location / {
+	...
+	return 404;
+	...
+}
+```
+
+### return 语法结构
+
+- 语法
+  - return code [text];
+  - return code URL;
+  - return URL;
+- 默认值：-
+- 上下文：server、location、if
 
 ## 4-8 rewrite 模块中的 rewrite 指令
 

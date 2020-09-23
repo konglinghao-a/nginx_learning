@@ -280,7 +280,25 @@ location / {
 
 ## 4-8 rewrite 模块中的 rewrite 指令
 
+### rewrite 功能
 
+- 根据指定正则表达式匹配规则，重写 URL
+
+### rewrite 语法结构
+
+- 语法：rewrite regex replacement [flag];
+- 默认值：-
+- 上下文：server、location、if
+- 示例：rewrite /images/(.*\\.jpg)$ /pic/$1;  $1 是前向引用的意思，也就是说 1 的内容差不多就是 (.*\\.jpg)
+
+### rewrite 中的 flag
+
+flag 可选值及含义
+
+- last：重写后的 url 发起新请求，再次进入 server 段，重试 location 中的匹配
+- break：直接使用重写后的 url，不在匹配其他 location 中语句
+- redirect：返回 302 临时重定向
+- permanent：返回 301 永久重定向
 
 ## 4-9 return 和 rewrite 指令执行顺序
 

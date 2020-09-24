@@ -295,12 +295,95 @@ location / {
 
 flag 可选值及含义
 
-- last：重写后的 url 发起新请求，再次进入 server 段，重试 location 中的匹配
+- last：对重写后的 url 发起新请求，再次进入 server 段，重试 location 中的匹配
 - break：直接使用重写后的 url，不在匹配其他 location 中语句
 - redirect：返回 302 临时重定向
 - permanent：返回 301 永久重定向
 
+### break 和 last
+
+```shell
+location /url_1 {
+	...
+	rewrite ... break; # 重写后的 url 会直接去磁盘上找对应的文件
+	...
+}
+location /url_2 {
+	...
+	rewrite ... last; # 重写后的 url 会继续走 location（从 /url_1 开始，往下匹配）
+	...
+}
+location /url_3 {
+	...
+	...
+	...
+}
+
+```
+
+```shell
+# 1、思考下面的匹配顺序
+server {
+	listen 80;
+	server_name www.kongli.top;
+	root html;
+	location /search {
+		rewrite ^/(.*) http://www.cctv.com permanent;
+	}
+	location /images {
+		rewrite /images/(.*) /pics/$1;
+	}
+	location /pics {
+		rewrite /pics/(.*) /photos/$1;
+	}
+	location /photos {
+    }
+}
+# 当浏览器中输入 www.kongli.top/search/a 的时候，它会被重定向到 www.cctv.com 这个网站
+# 当浏览器中输入 www.kongli.top/images/test.html 的时候，它会首先重写到 /pics/test.html ，然后再重写到 photos/test.html。这和在后面加 last：rewrite /images/(.*) /pics/$1 last; 效果一样，都会从头开始匹配 location
+```
+
+```shell
+# 2、思考下面的匹配顺序
+server {
+	listen 80;
+	server_name www.kongli.top;
+	root html;
+	location /images {
+		rewrite /images/(.*) /pics/$1 break;
+	}
+	location /pics {
+		rewrite /pics/(.*) /photos/$1;
+	}
+	location /photos {
+    }
+}
+# 在第二个 location 末尾加上了 break，那就说明它不会再从头匹配 location，也就是说如果你输入了 www.kongli.top/images/test.html ，会直接被重写到 /pics/test.html。
+```
+
+
+
 ## 4-9 return 和 rewrite 指令执行顺序
+
+```shell
+server {
+	listen 80;
+	server_name www.kongli.top;
+	root html;
+	location /images {
+		rewrite /images/(.*) /pics/$1 last;
+		return 200 "return 200 in /images";
+	}
+	location /pics {
+		rewrite /pics/(.*) /photos/$1;
+		return 200 "return 200 in /pics";
+	}
+	location /photos {
+		return 200 "return 200 in /photos";
+    }	
+}
+# 如果输入 www.kongli.top/images/test.html；首先，它会将 /images/test.html 重写到 /pics/test.html，并且后面有 last，所以会重新定位到 location /pics 里面
+```
 
 
 

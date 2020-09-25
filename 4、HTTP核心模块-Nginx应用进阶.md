@@ -340,7 +340,7 @@ server {
     }
 }
 # 当浏览器中输入 www.kongli.top/search/a 的时候，它会被重定向到 www.cctv.com 这个网站
-# 当浏览器中输入 www.kongli.top/images/test.html 的时候，它会首先重写到 /pics/test.html ，然后再重写到 photos/test.html。这和在后面加 last：rewrite /images/(.*) /pics/$1 last; 效果一样，都会从头开始匹配 location
+# 当浏览器中输入 www.kongli.top/images/test.html 的时候，它会首先重写到 /pics/test.html ，然后再重写到 photos/test.html。这和在后面加 last，比如：rewrite /images/(.*) /pics/$1 last; 效果一样，都会从头开始匹配 location，但是区别是，加了 last 之后会立即去从头开始匹配，但是不加的话会执行完当前 location 里面的内容然后再去从头匹配。
 ```
 
 ```shell
@@ -382,12 +382,55 @@ server {
 		return 200 "return 200 in /photos";
     }	
 }
-# 如果输入 www.kongli.top/images/test.html；首先，它会将 /images/test.html 重写到 /pics/test.html，并且后面有 last，所以会重新定位到 location /pics 里面
+# 如果输入 www.kongli.top/images/test.html；首先，它会将 /images/test.html 重写到 /pics/test.html，并且后面有 last，所以会重新定位到 location /pics 里面；到了 location /pics 里面之后，它依然具有重写能力，也就是说会重写到 /photos/test.html 中，但是它后面没有 last，所以会继续执行完 location 里面的内容，也就是说会执行到后面的 return 200 "return 200 in /pics"; 
+# 那么 location /pics 里面的内容都被执行了，以哪个为准呢？由于是顺序执行，因此以下面的 return 200 "return 200 in /pics"; 为准。
+# 如果把 location /pics 里的第一句后面加上 break，那么就以第一句为准（也就是说去找 /photos/test.html）。
+
+# 若 location 中只有个 return（例如 location /photos），即使访问 /photos/test.html（photos 下面的确有这个 html 文件），返回的也是 return 的内容。
 ```
 
-
-
 ## 4-10 rewrite 模块中if指令
+
+根据条件的不同对 url 进行不同的处理。
+
+### 语法结构
+
+- 语法：if (condition) { ... };
+- 默认值：-
+- 上下文：server、location
+
+```shell
+# 示例
+if ($http_user_agent ~ Chrome) { # $http_user_agent 是内置的变量，用户请求某个 url 的时候会自动带上。
+	rewrite /(.*)/browser/$1 break;
+}
+```
+
+### condition 的用法
+
+- $variable：仅为变量时，值为空或以 0 开头字符串都会被当作 false 来处理
+- = 或 !=：相等或不等比较
+- ~ 或 !~：正则匹配或非正则匹配
+- ~*：正则匹配，不区分大小写
+- -f 或 !-f：检查文件存在或不存在
+- -d 或 !-d：检查目录存在或不存在
+- -e 或 !-e（exist 的缩写）：检查文件、目录、符号链接等存在或不存在
+- -x 或 !-x：检查文件可执行或不可执行
+
+```shell
+server {
+	listen 8080;
+	server_name localhost;
+	root html;
+	
+	location /search/ {
+		if ($remote_addr = "192.168.1.1") {
+			return 200 "test if OK in url /search/";
+		}
+		# 如果 if 匹配不到，那么就会去 /search/ 目录下找 index.html 文件。
+	}
+}
+```
 
 
 

@@ -395,13 +395,13 @@ server {
 
 ### 语法结构
 
-- 语法：if (condition) { ... };
+- 语法：if ( condition ) { ... };
 - 默认值：-
 - 上下文：server、location
 
 ```shell
 # 示例
-if ($http_user_agent ~ Chrome) { # $http_user_agent 是内置的变量，用户请求某个 url 的时候会自动带上。
+if ( $http_user_agent ~ Chrome ) { # $http_user_agent 是内置的变量，用户请求某个 url 的时候会自动带上。
 	rewrite /(.*)/browser/$1 break;
 }
 ```
@@ -424,33 +424,130 @@ server {
 	root html;
 	
 	location /search/ {
-		if ($remote_addr = "192.168.1.1") {
+		if ( $remote_addr = "192.168.1.1" ) {
 			return 200 "test if OK in url /search/";
 		}
-		# 如果 if 匹配不到，那么就会去 /search/ 目录下找 index.html 文件。
+		# 如果 if 匹配不到，那么就会去 /search/ 目录下找 index.html 文件，如果有的话就返回，没有的话返回个错误信息。
+	}
+}
+```
+
+```shell
+server {
+	listen 8080;
+	server_name localhost;
+	root html;
+	
+	location / {
+		if ( $uri = "/images" ) {
+			rewrite (.*) /pics/ break;
+		}
+		return 200 "test if failed"; # rewrite 和 return 会依次执行，所以会返回 200，因此实际生产环境中不这么写，也就是说有 if 语句就可以了，下面不会再写 return。
+	}
+}
+```
+
+## 4-11 autoindex 模块用法
+
+- 它的功能是当用户请求以 / 结尾时，列出目录结构。
+
+### 指令集
+
+- autoindex：会列出所有的目录
+  - 语法：**autoindex on | off**
+  - 默认值：autoindex off
+  - 上下文：http、server、location
+- autoindex_exact_size：显示文件的大小（精确到字节）
+  - 语法：**autoindex_exact_size on | off**
+  - 默认值：autoindex_exact_size on;
+  - 上下文：http、server、location;
+- autoindex_format：返回目录结构的时候是以哪种格式返回
+  - 语法：**autoindex_format html | xml | json | jsonp;**
+  - 默认值：autoindex_format html;
+  - http、server、location
+- autoindex_localtime：显示文件的时间格式
+  - 语法：**autoindex_localtime on | off;**
+  - 默认值：autoindex_localtime off;
+  - 上下文：http、server、location
+
+```shell
+server {
+	listen 80;
+	server_name autoindex.kutian.edu;
+	
+	# 当访问 download 的时候就回去 /opt/source 目录下找
+	location /download/ {
+		root /opt/source;
+		# index a.html; # 如果 a.html 存在的话那就会匹配 a.html 的内容，因此不要写 index 才能让 autoindex这个功能生效。
+		autoindex on;
+		autoindex_exact_size on;
+		autoindex_format html;
+		autoindex_localtime off;
 	}
 }
 ```
 
 
 
-## 4-11 autoindex 模块用法
-
-
-
 ## 4-12 Nginx 变量的分类
 
-
+- TCP 连接变量
+- HTTP 请求变量
+- Nginx 处理 HTTP 请求产生的变量
+- Nginx 返回响应变量
+- Nginx 内部变量
 
 ## 4-13 TCP 连接相关变量
 
+### 常用变量
 
+- remote_addr：客户端 IP 地址
+- remote_port：客户端端口
+- server_addr：服务端 IP 地址
+- server_port：服务端端口
+- server_protocol：服务端协议
+- binary_remote_addr：二进制格式的客户端 IP 地址
+- connection：TCP 连接的序号，递增
+- connection_request：TCP 连接当前的请求数量
+- proxy_protocol_addr：若使用了 proxy_protocol 协议，则返回协议中地址，否则返回空
+- proxy_protocol_port：若使用了 proxy_protocol 协议，则返回协议中端口，否则返回空
 
 ## 4-14 发送 HTTP 请求变量
 
+### 常用变量
 
+- uri：请求的 URL，不包含参数
+- request_uri：请求的 URL，包含参数
+- scheme：协议名，http 或 https
+- request_method：请求方法
+- request_length：全部请求的长度，包括请求行、请求头、请求体
+- args：全部参数字符串
+- arg_参数名：特定参数值
+- is_args：URL 中有参数则返回 ?；否则返回空
+- query_string：与 args 相同
+- remote_user：由 HTTP Basic Authentication 协议传入的用户名
 
-## 4-15 处理 HTTP 请求变量
+### 特殊变量
+
+- host：先看请求行（请求行里有 host 的值就会直接赋值给它），再看请求头，最后找 server_name
+- http_user_agent：用户浏览器
+- http_referer：从哪些链接过来的请求
+- http_via：经过一层代理服务器，添加对应代理服务器的信息
+- http_x_forwarded_for：获取用户真实 IP
+- http_cookie：用户  cookie
+
+## 4-15 处理 HTTP 请求时相关变量
+
+### 常用变量
+
+- request_time：处理请求以耗费的时间
+- request_completion：请求处理完成返回 OK，否则返回空
+- server_name：匹配上请求的 server_name 值
+- https：若开启 https，则返回 on，否则返回空
+- request_filename：磁盘文件系统待访问文件的完整路径
+- document_root：由 URI 和 root/alias 规则生成的文件夹路径
+- realpath_root：将 document_root 中的软链接转换成真实路径
+- limit_rate：返回响应时的速度上限值
 
 
 

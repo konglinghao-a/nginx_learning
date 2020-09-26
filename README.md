@@ -1,6 +1,6 @@
 ## 这是我学习 nginx 的一段旅程 =w=
 
-主要是看[慕课](https://coding.imooc.com/class/405.html)的时候做的笔记 ^_^
+学习 nginx 的时候做的笔记 ^_^  。学习网址在[这里](https://coding.imooc.com/class/405.html)。
 
 ### [1、Nginx基础](./1、Nginx基础.md)
 

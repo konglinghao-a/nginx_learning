@@ -59,7 +59,7 @@
     | loader_sleep      | CL 加载缓存文件到内存后，进程休眠时间；默认 200 毫秒         |
     | loader_threshold  | CL 每次载入文件到共享内存的最大耗时；默认 50 毫秒            |
 
-- **proxy_cache_key**：缓存的内容的 key
+- **proxy_cache_key**：缓存的内容的 key。nginx 在对资源做缓存的时候，它需要对资源的某一部分做 hash 计算，而对于哪一部分做 hash 计算，就由 proxy_cache_key 来指定。也就是说这个 key 是由我们自己指定的。
   - 语法：proxy_cache_key string;
   - 默认值：proxy_cache_key $scheme$proxy_host$reqeust_uri;
   - 上下文：http、server、location
@@ -181,13 +181,142 @@ nginx 缓存配置：
   - 默认值：proxy_cache_lock_age 5s;
   - 上下文：http、server、location
 
+### 配置
+
+`/opt/nginx/conf.d/nginx_cache.conf`
+
+```shell
+# http { # 这个配置文件在 http 里面被 include 了
+	proxy_cache_path /opt/nginx/cache_temp levels=2:2 keys_zone=cache_zone:30m max_szie=32g inactive=60m use_temp_path=off;
+	
+	upstream cache_server {
+	    server 192.168.1.20:1010;
+        server 192.168.1.20:1011;
+	}
+	
+	server {
+		listen 80;
+		server_name cache.kutian.edu;
+		
+		if ( $request_uri ~ \.(txt|text)$ ) { # 对 .txt 和 .text 结尾的文件做特殊处理
+			set $cookie_name "no cache"; # 声明一个变量，将 no cache 赋值给 cookie_name
+		}
+		
+		location / {
+			proxy_cache cache_zone; # 与上面 keys_zone 保持一致
+			proxy_no_cache $cookie_name;
+			proxy_cache_valid 200 5m;
+			add_header Nginx-Cache-Status "$upstream_cache_status";
+			proxy_pass http://cache_server;
+			# 缓存失效以后的策略
+			proxy_cache_lock on;
+			proxy_cache_lock_timeout 5s;
+			proxy_cache_lock_age 5s;
+		}
+	}
+
+# }
+```
+
+
+
 ## 7-6 缓存失效降低上游压力机制—启用陈旧缓存
 
+对于某些实时性要求没那么高的场景来说，返回一个陈旧的内容比直接返回 404 的用户体验是更好的。当有很大的并发请求到达 nginx 服务器，nginx 出于某些原因缓存失效，这时候按理来说会把所有请求都透传给上游服务器，但是开启了陈旧缓存之后，有些请求会直接调用陈旧缓存来返回，这样就大大减少了上游服务器的压力。
+
+### 指令
+
+- **proxy_cache_use_stale：** 启用陈旧缓存
+
+  - 语法：proxy_cache_use_stale error | timeout | invalid_header | updating | http_500 | http_502 | http_503 | http_504 | http_403 | http_404 | http_429 | off ... ;
+
+  - 默认值 ：proxy_cache_use_stale off;
+
+  - 上下文：http、server、location
+
+  - 可选参数含义
+
+    | 可选参数       | 含义                                       |
+    | -------------- | ------------------------------------------ |
+    | error          | 与上游建立连接、发送请求、读取响应头出错时 |
+    | timeout        | 与上游建立连接、发送请求、读取响应头超时时 |
+    | invalid_header | 无效头部时                                 |
+    | updating       | 缓存过期，正在更新时                       |
+    | http_500       | 返回状态码 500 时                          |
+    | http_502       | 返回状态码 502 时                          |
+    | http_503       | 返回状态码 503 时                          |
+    | http_504       | 返回状态码 504 时                          |
+    | http_403       | 返回状态码 403 时                          |
+    | http_404       | 返回状态码 404 时                          |
+    | http_429       | 返回状态码 429 时                          |
+
+- **proxy_cache_background_update：**让新的缓存更新的时候，在后台去执行。
+
+  如果是 off 的情景下，第一个请求过来，nginx 发现缓存失效，那么第一个请求就会被 nginx 交给上游服务器。这个时候对于第一个请求来说它是得不到结果的，它可能需要很长的时间等待上游服务器响应。
+
+  如果是 on 的情境下，对于 nginx 来说，不管你是第一个请求还是第几个请求，都会直接使用 nginx 自身的缓存然后直接返回。但是 nginx **自身**会发起 http 请求给上游应用服务器，让上游服务器去更新对应的资源。也就是说不是由客户端请求去更新的，是 nginx 自身会发起 http 请求给上游应用服务器然后去更新。这个时候对用户的体验是比较好的，因为即使是第一个请求也马上返回了虽然用的是过期的缓存。
+
+  所以这个指令就是针对第一个请求是有效的，它会让所有的 nginx 请求都使用陈旧缓存，直接返回结果。
+
+  - 语法：proxy_cache_background_update on | off;
+  - 默认值：proxy_cache_background_update off;
+  - 上下文：http、server、location;
+
+### 配置
+
+`/opt/nginx/conf.d/nginx_cache.conf`
+
+```shell
+# http { # 这个配置文件在 http 里面被 include 了
+	proxy_cache_path /opt/nginx/cache_temp levels=2:2 keys_zone=cache_zone:30m max_szie=32g inactive=60m use_temp_path=off;
+	
+	upstream cache_server {
+	    server 192.168.1.20:1010;
+        server 192.168.1.20:1011;
+	}
+	
+	server {
+		listen 80;
+		server_name cache.kutian.edu;
+		
+		if ( $request_uri ~ \.(txt|text)$ ) { # 对 .txt 和 .text 结尾的文件做特殊处理
+			set $cookie_name "no cache"; # 声明一个变量，将 no cache 赋值给 cookie_name
+		}
+		
+		location / {
+			proxy_cache cache_zone; # 与上面 keys_zone 保持一致
+			proxy_no_cache $cookie_name;
+			proxy_cache_valid 200 5m;
+			add_header Nginx-Cache-Status "$upstream_cache_status";
+			proxy_pass http://cache_server;
+			# 缓存失效以后的策略
+			proxy_cache_lock on;
+			proxy_cache_lock_timeout 5s;
+			proxy_cache_lock_age 5s;
+			# 启用陈旧缓存
+			proxy_cache_use_stale error timeout updating;
+			proxy_cache_background_update on;
+		}
+	}
+
+# }
+```
 
 
-## 7-7 第三方清除模块 nginx_cache_purge 介绍
 
+## 7-7 第三方缓存清除模块 nginx_cache_purge 介绍
 
+### 模块功能
+
+- 功能：根据接收的 HTTP 请求立即清除缓存
+- 使用 --add-module 指令添加到 nginx 中
+
+### 指令
+
+- **proxy_cache_purge**
+  - 语法：proxy_cache_purge zone_name key;  zone_name 是共享内存的地址，在清除某些缓存的时候可以带上 key（可以看看上面的 proxy_cache_key 指令）。
+  - 默认值：无
+  - 上下文：http、server、location
 
 ## 7-8 ngx_cache_purge 用法配置示例
 

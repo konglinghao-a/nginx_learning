@@ -104,6 +104,7 @@ nginx 缓存配置：
 		location / {
 			proxy_cache cache_zone; # 与上面 keys_zone 保持一致
 			proxy_cache_valid 200 5m;
+			proxy_cache_key $proxy_host$request_uri;
 			add_header Nginx-Cache-Status "$upstream_cache_status";
 			proxy_pass http://cache_server;
 		}
@@ -150,6 +151,7 @@ nginx 缓存配置：
 			proxy_cache cache_zone; # 与上面 keys_zone 保持一致
 			proxy_no_cache $cookie_name;
 			proxy_cache_valid 200 5m;
+			proxy_cache_key $proxy_host$request_uri;
 			add_header Nginx-Cache-Status "$upstream_cache_status";
 			proxy_pass http://cache_server;
 		}
@@ -206,6 +208,7 @@ nginx 缓存配置：
 			proxy_cache cache_zone; # 与上面 keys_zone 保持一致
 			proxy_no_cache $cookie_name;
 			proxy_cache_valid 200 5m;
+			proxy_cache_key $proxy_host$request_uri;
 			add_header Nginx-Cache-Status "$upstream_cache_status";
 			proxy_pass http://cache_server;
 			# 缓存失效以后的策略
@@ -287,6 +290,7 @@ nginx 缓存配置：
 			proxy_cache cache_zone; # 与上面 keys_zone 保持一致
 			proxy_no_cache $cookie_name;
 			proxy_cache_valid 200 5m;
+			proxy_cache_key $proxy_host$request_uri;
 			add_header Nginx-Cache-Status "$upstream_cache_status";
 			proxy_pass http://cache_server;
 			# 缓存失效以后的策略
@@ -320,23 +324,120 @@ nginx 缓存配置：
 
 ## 7-8 ngx_cache_purge 用法配置示例
 
+nginx 配置：
+
+`/opt/nginx/conf.d/nginx_cache.conf`
+
+```shell
+# http { # 这个配置文件在 http 里面被 include 了
+	proxy_cache_path /opt/nginx/cache_temp levels=2:2 keys_zone=cache_zone:30m max_szie=32g inactive=60m use_temp_path=off;
+	
+	upstream cache_server {
+	    server 192.168.1.20:1010;
+        server 192.168.1.20:1011;
+	}
+	
+	server {
+		listen 80;
+		server_name cache.kutian.edu;
+		
+		if ( $request_uri ~ \.(txt|text)$ ) { # 对 .txt 和 .text 结尾的文件做特殊处理
+			set $cookie_name "no cache"; # 声明一个变量，将 no cache 赋值给 cookie_name
+		}
+		
+		# 定义这个 location 专门用来清除缓存
+		location ~ /cache_purge(/.*) { # 用括号括起来之后就可以直接用 $1 来引用这个变量
+			proxy_cache_purge cache_zone $host$1;# 缓存的空间是 cache_zone；缓存资源的 key 是 $host$uri
+		}
+		
+		location / {
+			proxy_cache cache_zone; # 与上面 keys_zone 保持一致
+			proxy_no_cache $cookie_name;
+			proxy_cache_valid 200 5m;
+			proxy_cache_key $host$uri;
+			add_header Nginx-Cache-Status "$upstream_cache_status";
+			proxy_pass http://cache_server;
+			# 缓存失效以后的策略
+			proxy_cache_lock on;
+			proxy_cache_lock_timeout 5s;
+			proxy_cache_lock_age 5s;
+			# 启用陈旧缓存
+			proxy_cache_use_stale error timeout updating;
+			proxy_cache_background_update on;
+		}
+	}
+
+# }
+```
 
 
-## 7-9 https 原理基础
 
+## 7-9 关于 https
 
+### http 协议存在的问题
+
+- 数据使用明文传输，可能被黑客窃取（**https 使用加密技术进行了信息加密**）
+- 报文的完整性无法验证，可能被黑客篡改（**https 用数字签名来保证报文完整性**）
+- 无法验证通信双方的身份，可能被黑客伪装（**https 用数字证书验证身份**）
+
+### https
+
+- 所谓 https，其实只是身披 **TLS/SSL** 协议外壳的 http
+- https 并非一个应用层协议
 
 ## 7-10 https 如何解决信息被窃听的问题
 
+### 加密算法
 
+- 对称加密：DES、AES、3DES
+- 非对称加密：RSA、DSA、ECC
+
+### 对称加密优劣势
+
+- 优势
+  - 解密效率高
+- 劣势
+  - 密钥无法实现安全传输
+  - 密钥的数目难于管理（第一个客户端与服务器建立连接的时候维护一个密钥；第二个客户端与服务器连接的时候也维护一个密钥.....客户端一多，服务器要维护的密钥也就越来越多了，这对高并发的服务器来说是个灾难。）
+  - 无法提供信息完整性校验
+
+### 非对称加密算法优劣势
+
+- 优势
+  - 服务器仅维持一个私钥即可
+- 劣势
+  - 公钥是公开的
+  - 非对称加密算法加解密过程中会耗费一定时间
+  - 公钥并不包含服务器信息，存在中间人攻击的可能性。
+
+### https 加密的原理
+
+- https 混合使用对称加密和非对称加密
+- 连接建立阶段使用非对称加密算法
+- 内容传输阶段使用对称加密算法
 
 ## 7-11 https 如何解决报文被篡改以及身份伪装问题
 
+### 解决报文被篡改—数字签名
 
+- 确定消息的确是由发送方签名发送过来的，因为别人假冒不了发送方的签名
+- 能确定消息的完整性，证明数据从未被其他人篡改过
+
+### 数字签名生成流程
+
+![](./media/20.png)
+
+### 数字签名验证流程
+
+![](./media/21.png)
+
+### 解决身份伪装的问题
+
+这个问题利用 CA 就能够很好地解决。
 
 ## 7-12 配置私有 CA 服务器
 
-
+真正的 CA 服务器在实际生产环境中是不怎么用的，因为在公网中的 htttps 通常是会去买真正的证书。在这里配置是为了熟悉颁发证书的一个流程。
 
 ## 7-13 组织机构向 CS 申请书及 CA 签发证书
 

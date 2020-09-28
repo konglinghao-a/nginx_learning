@@ -439,7 +439,93 @@ nginx 配置：
 
 真正的 CA 服务器在实际生产环境中是不怎么用的，因为在公网中的 htttps 通常是会去买真正的证书。在这里配置是为了熟悉颁发证书的一个流程。
 
-## 7-13 组织机构向 CS 申请书及 CA 签发证书
+搞一台新的纯净 centos，ip 是：192.168.1.30
+
+装完了 centos 以后，其实它就已经内置了 openssl 服务：
+
+```shell
+cd /etc/pki
+ls
+# CA   ca-trust   java   nssdb   rpm-gpg   rsyslog   tls
+
+# 发现已经有一个 CA 目录，这个目录里面就藏着证书和签名等内容。
+cd CA
+# certs   crl   newcerts   private
+# crl 用于证书的吊销（一个证书机构既能颁发证书也能吊销证书）
+# private 是用于存放私钥的地方
+
+# 进入 tls 目录下的 openssl.cnf 文件看看
+vim /etc/pki/tls/openssl.cnf
+```
+
+`/etc/pki/tls/openssl.cnf`
+
+```shell
+#######################################
+[ ca ]
+default_ca = CA_default           # The default ca section
+#######################################
+[ CA_default ]
+
+dir = /etc/pki/CA                 # Where everything is kept
+certs = $dir/certs                # Where the issued certs are kept
+crl_dir = $dir/crl                # Where the issued crl are kept
+database = $dir/index.txt         # database index file，存放已经签发过的证书信息
+# unique_subject = no             # Set to 'no' to allow creation of
+                                  # serveral ctificates with same subject.
+new_certs_dir = $dir/newcerts     # default place for new certs
+
+certificate = $dir/cacert.pem     # The CA certificate，对于 CA 自身签发的证书
+serial = $dir/serial              # The current serial number
+crlnumber = $dir/crlnumber        # the current crl number
+# ...
+```
+
+### CA 搭建命令
+
+```shell
+cd /etc/pki/CA/
+
+# 加个括号意思就是说打开个子 shell，在子 shell 中执行这些命令而不影响当前的 shell
+# 用 openssl 来生产 ca 自身的私钥信息
+(umask 077; openssl genrsa -out private/cakey.pem 1024)
+
+# 有了上面的密钥之后，我们就可以对这个密钥进行签发
+openssl req -new -x509 -key private/cakey.pem -out cacert.pem -days 365
+
+# 创建相关的数据库，用来保存证书的信息；后面的序列号跟证书没多大关系，只是存储的时候需要用到序列号
+touch index.txt serial 
+echo 5001 > serial
+
+# 存放所有的证书；比如说有一个组织机构，一个证书请求过来之后它就会放到 csr 目录下，我们需要签发的时候就到这个目录下找相应的信息。
+mkdir csr
+```
 
 
+
+## 7-13 组织机构向 CA 申请证书及 CA 签发证书
+
+### 组织机构申请证书
+
+```shell
+# 这个目录用来存放我们生成的私钥以及生成的证书请求文件
+mkdir /opt/nginx/https -pv
+cd /opt/nginx/https
+
+# 生成私钥，私钥的长度是 1024 位
+(umask 077; openssl genrsa -out kutian.edu.key 1024)
+# 生成完了以后就会多出一个 kutian.edu.key 这个文件，它就是组织的私钥文件
+
+# 有了私钥文件之后就可以生成一个证书请求，这个证书请求文件最终就会被发送给 CA 服务器
+openssl req -new -key kutian.edu.key -out kutian.edu.csr
+scp kutian.edu.csr root@192.168.1.30:/etc/pki/CA/csr
+```
+
+### CA  签署组织机构发过来的证书
+
+```shell
+cd /etc/pki/CA
+# 签发证书（想要签发成功需要证书机构的服务器和组织的服务器的 stateOrProvinceName 相同才可以，比如都是 Shanghai）
+openssl ca -in csr/kutian.edu.csr -out kutian.edu.crt -days 365
+```
 

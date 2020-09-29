@@ -42,18 +42,222 @@
 
 这时候会有一个问题，对于 GateWay 这样的网关设备（它可能是路由器或者是别的什么东西），它是一个单点，也就是说假设网关设备出现了问题之后，内网中所有的 PC 其实都是无法访问公网中的 Internet 了。如果要解决单点故障的问题，会有这样一个思路：准备另一台 GateWay 网关设备（也就是说有两台一模一样的设备），给这台 GateWay 也配置上两个 IP 地址（一个内网的 IP 地址，一个公网的 IP 地址）。
 
-这个时候又会出现一个问题，那就是内网中这两个 GateWay 的 IP 不能是相同的。那么该如何实现两个 GateWay 对所有的 PC 都只呈现一个 IP 地址呢？VRRP 就能实现这个功能。举个例子：在一台 GateWay 上配置的内网 IP 是 192.168.1.2，另外一台 GateWay 上配置的内网 IP 是 192.168.1.3，这两个 IP 地址不是用来给 PC 们访问用的。这时候会再有一个公用的 IP 地址：192.168.1.1，这个 IP 地址在两个 GateWay 上都能够配置。
+这个时候又会出现一个问题，那就是内网中这两个 GateWay 的 IP 不能是相同的。那么该如何实现两个 GateWay 对所有的 PC 都只呈现一个 IP 地址呢？VRRP 就能实现这个功能。
 
 ![](./media/23.png)
 
+假设 Master GateWay 上配置的内网 IP 是 192.168.1.2，Backup GateWay 上配置的内网 IP 是 192.168.1.3，这两个 IP 地址不是用来给 PC 们访问用的。这时候会再有一个公用的 IP 地址：192.168.1.1（就是上面所示的 VIP，就是虚拟的IP），这个 IP 地址在两个 GateWay 上都能够配置，因为它是在两个 GateWay 之间漂移的。这个 VIP 是真正对 PC 提供服务的（也就是说 PC 的代理都要设置成这个 VIP 地址）。如果是 Master GateWay 在进行工作，那么 VIP 就是配置在 Master 上的，不会配置在 Backup GateWay 上。如果 Master GateWay 出现故障了，这个时候 VIP 才会漂移到 Backup GateWay 上。
+
+那问题又来了，为啥还要有 VMAC 这个地址呢？我们都知道 MAC 地址是和我们的网卡绑定的，不同网卡的 MAC 地址是不一样的。如果 VIP 是配置在 Master GateWay 上的，这个时候对应的 PC 电脑和 VIP 进行通信的时候它会发 ARP 请求，同时它得到的会是 Master GateWay 上的对应网卡的 MAC 地址信息。这个时候如果 VIP 转移到备用机器上了，备用机器的 MAC 地址肯定和之前的不一样。所以这个时候需要有一个 VMAC，它这个 MAC 对于所有的客户端来说都是一样的。所以当 GateWay 正常工作时，VIP 和 VMAC 会一同配置到它上面；如果 GateWay 出现故障了，那么 VIP 和 VMAC 会一同被转移到备用机上，**其实这就是 VRRP 实现的能力**。
+
+### 核心概念
+
+- 虚拟网关：有一个 Master 和 多个 Backup 组成
+- Master 网关：实际承载报文转发的节点，主节点
+- Backup 网关：主节点故障后转移节点，备用节点
+- 虚拟 IP 地址：虚拟网关对外提供服务的 IP 地址
+- IP 地址拥有者：真实提供服务的节点，通常为主节点
+- 虚拟 MAC 地址：回应 ARP 请求时使用的虚拟 MAC 地址
+- 优先级：如果有多台 Backup 网关，当主节点挂掉了之后会优先使用高优先级的 Backup 来配置
+- 非抢占式：若有两台 Backup（假定为 Backup1 和 Backup2，且 Backup1 的优先级高于 Backup2），Backup1 出问题了，配置会转移到 Backup2；若 Backup1 好了，那么配置会继续在 Backup2 生效，不会转移回 Backup1。
+- 抢占式：与非抢占式相反，若 Backup1 好了，它的优先级比较高，会去枪 Backup2 的配置，所以配置会转移回 Backup2
+- **注意**：抢占式和非抢占式对 Master 无效，也就是说 Master 一旦恢复了，它一定会去抢配置
 
 ## 8-3 KeepAlived 软件架构
 
+KeepAlived 是实现了 VRRP 的软件。
 
+### KeepAlived 架构图
+
+![](./media/24.png)
+
+### 核心能力
+
+- 服务器服务的故障转移
+- 通常用于对负载均衡器做高可用
+
+### 设用场景
+
+- 高可用 LVS
+  - 虚拟 IP 的转移
+  - 生成 ipvs 规则
+  - RS（real server） 健康状态检测
+- 高可用其他服务
+  - 虚拟 IP 的转移
+  - 编写脚本实现服务启动 / 停止
+
+### KeepAlived 核心组件
+
+- vrrp stark：vrrp 协议的实现
+- ipvs wrapper：为集群内的节点生成 ipvs 规则
+- checkers：对集群内所有的 RS 做健康状态检测
+- 控制组件：设置文件解析和加载
 
 ## 8-4 使用 KeepAlived 配置实现虚拟 IP 在多服务器节点漂移
+
+### 实验规划
+
+- 2 台 Linux，一主一备。
+- 节点1   192.168.1.30   CentOS   Master
+- 节点2   192.168.1.40   CentOS   Backup
+- VIP      192.168.1.50 
+
+### 实验步骤
+
+**Master：192.168.1.30**
+
+```shell
+# 安装 KeepAlived
+yum install keepalived
+
+# 看看生成了哪些文件
+rpm -ql keepalived
+
+# 看看主配置文件，并修改一波
+vim /etc/keepalived/keepalived.conf
+```
+
+`/etc/keepalived/keepalived.conf`
+
+```shell
+# 指定了 keepalived 的全局属性，里面所有的定义对整个 keepalived 都会生效
+global_defs {
+	notification_email { # 用于通知的 email。
+		kong@qq.com
+	}
+	notification_email_from ka@qq.com # 发邮件者
+	smtp_server 192.168.1.200 # 我们这里不存在真正的邮件服务器，所以随便写一个
+	smtp_connect_timeout 30 # 连接邮件服务器时候的超时时长
+	router_id Nginx # 这个名字不用管
+	# 下面这些配置可以先注释掉
+	# vrrp_skip_check_adv_addr
+	# vrrp_strict # 严格模式，生产环境可以去掉
+	# vrrp_garp_interval 0
+	# vrrp_gna_interval 0
+}
+
+# vrrp 的实例，这个实例的名称叫做 VI_1
+vrrp_instance_VI_1 {
+	state MASTER # 在当前的 vrrp 实例中是 Master 节点还是 Backup 节点。
+	interface eth33 # 当前的服务器需要去绑定的网卡，网卡的名字是 eth33
+	virtual_router_id 51 # 标注虚拟路由的 id
+	priority 100 # 指定优先级，当故障发生的时候值越大的会优先顶替上去
+	advert_int 1
+	# nopreempt # 如果是 Backup，默认是抢占式的，有了这句话就能变成非抢占式的。这对 Master 无效。
+	authentication {
+		auth_type PASS
+		auth_pass 1111
+	}
+	virtual_ipaddress { # 在这里面配置虚拟的 IP 地址，也就是真正提供服务的 IP 地址
+		192.168.1.50
+	}
+}
+
+# 下面一些没有的都可以删掉了
+# ...
+```
+
+```shell
+# 关闭一下 selinux 和 防火墙，不关闭的话，心跳信息可能传递不过去
+setenforce 0
+systemctl stop firewalld
+
+# 启动
+systemctl start keepalived
+```
+
+**Backup：192.168.1.40**
+
+```shell
+# 安装 KeepAlived
+yum install keepalived
+
+# 看看主配置文件，并修改一波
+vim /etc/keepalived/keepalived.conf
+```
+
+`/etc/keepalived/keepalived.conf`
+
+```shell
+global_defs {
+	notification_email {
+		kong@qq.com
+	}
+	notification_email_from ka@qq.com
+	smtp_server 192.168.1.200
+	smtp_connect_timeout 30
+	router_id Nginx 
+}
+
+# 这个实例名要和 Master 里面的一样
+vrrp_instance_VI_1 {
+	state BACKUP # 这个是备用服务器，所以是 BACKUP
+	interface eth33 
+	virtual_router_id 51 # 这个 router_id 必须和 Master 里面的一样！这样它才会理解这是相同的 vrrp_instance
+	priority 98 # 优先级得比 Master 的低
+	advert_int 1
+	# nopreempt # 默认是抢占式的，有了这句话就能变成非抢占式的
+	authentication {
+		auth_type PASS
+		auth_pass 1111
+	}
+	virtual_ipaddress {
+		192.168.1.50
+	}
+}
+```
+
+```shell
+# 关闭一下 selinux 和 防火墙
+setenforce 0
+systemctl stop firewalld
+
+# 启动
+systemctl start keepalived
+```
 
 
 
 ## 8-5 KeepAlived + Nginx 高可用原理
+
+光有虚拟端口的漂移可能还不够，根据服务可用的三要素，你的备用服务器还需要有相应的数据文件，还要启动 nginx 软件然后监听对应的端口。并且 keepalived 只会在自身服务关闭，或者服务器宕机的时候将虚拟 IP 进行转移，nginx 程序宕掉了，它是不会转移 IP 的。因此我们需要编写一个脚本来判断当前 nginx 是否存活。
+
+`nginx_health.sh`
+
+```shell
+#!/bin/bash
+
+# 查看 nginx 是否还存在
+ps -ef | grep nginx | grep -v grep &> /dev/null
+
+# 如果 $? 是 0，则说明 nginx 还存在
+if [ $? -ne 0 ]; then
+	killall keepalived # 杀死了 keepalived 就强制了虚拟 IP 进行转移
+fi
+
+```
+
+```shell
+# 给脚本赋予可执行权限
+chmod +x nginx_health.sh
+
+# 然后把这个脚本复制到另外一个节点上
+```
+
+有了脚本之后就可以去 keepalived 主配置文件里面进行脚本的配置
+
+`/etc/keepalived/keepalived.conf`
+
+```shell
+# ...
+
+#脚本配置
+vrrp_script chk_http_port {
+　　script "/nginx_health.sh"　　　　             #检测脚本文件的位置
+　　interval 2　　　　　　　　　　　　　　　　　　　　#（检测脚本执行的间隔）
+　　weight 2　　　　　　　　　　　　　　　　　　　　　　#权重（即当脚本中的条件成立时权重进行修改）
+}
+
+# ...
+```
 
